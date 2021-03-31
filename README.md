@@ -59,3 +59,15 @@ Introducimos la password: `admin`
 airflow webserver --port 8080
 airflow scheduler
 ```
+
+## Creación de la carpeta para albergar los DAGs
+
+Dentro del fichero `~/airflow/airflow.cfg` está la propiedad `dags_folder`. Es aquí donde ubicaremos los scripts que diseñemos. En nuestro caso tenemos
+```
+dags_folder = /home/jcla/airflow/dags
+```
+
+Por lo tanto:
+```
+mkdir ~/airflow/dags
+```
