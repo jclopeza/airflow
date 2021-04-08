@@ -204,7 +204,7 @@ Si pausamos la ejecución de un DAG y la reanudamos más adelante, Airflow inten
 
 Controla si debe ejecutarse o no el backfilling.
 
-# Airflow: Ejecución en paralelo y escalado
+# Airflow: Ejecución en paralelo y escalado. LocalExecutor
 
 Estudiaremos los parámetros necesarios para ejecutar múltiples DAGs y veremos qué **executors** nos permitirán escalar Airflow. Seremos capaces de ejecutar tantas tareas como necesitemos.
 
@@ -234,9 +234,133 @@ Instalamos un paquete adicional:
 Modificamos los siguientes parámetros en el fichero de configuración:
 
 * `sql_alchemy_conn = postgresql+psycopg2://airflow:airflow@localhost:5432/airflow`
+* `executor = LocalExecutor`
 
 Comprobamos el acceso con:
 
 * `airflow db check`
 
 Si el resultado es correcto indicará que hemos configurado correctamente Airflow para utilizar Postgres como nuestro repositorio para el metastore.
+
+Ahora detenemos el scheduler y el webserver, y ejecutamos de nuevo la orden:
+
+* `airflow db init`
+
+Y la de creación de usuario (vista más arriba).
+
+Iniciamos los procesos y veremos que ahora las tareas se ejecutan en paralelo.
+
+# Airflow: Ejecución en paralelo y escalado. CeleryExecutor
+
+Con el LocalExecutor ejecutaremos todas las tareas en un solo servidor como si fuesen subprocesos. Esto también tiene limitaciones. Con el LocalExecutor, todas las tareas que se tienen que ejecutar se envían a una cola o `queue` para que se ejecuten en el orden correcto, y cada una de esas tareas se convierte en un subproceso.
+
+Ahora tendremos `workers`, serán máquinas dedicadas donde se ejecutarán las tareas existentes en la `queue`.
+
+## CeleryExecutor
+
+Es un sistema de tareas distribuído.
+
+<img src="img/i_005.png"/>
+
+Con el CeleryExecutor, la `queue` está fuera del executor y en este caso la cola será gestionada por **Redis**.
+
+Démonos cuenta del parámetro `worker_concurrency = 2`. Define el number de tareas que se pueden ejecutar a la vez en cada worker.
+
+<img src="img/i_006.png"/>
+
+## Configuración
+
+* `pip install apache-airflow[celery]`
+
+### Redis 
+
+* `pip install apache-airflow[redis]`
+* `sudo apt install redis-server`
+* Cambiamos la configuración de redis para arrancarlo como servicio, cambiamos `supervised` con el valor **systemd**.
+* `sudo systemctl restart redis.service` y comprobamos que se ha iniciado con `sudo systemctl restart redis.service`
+
+Instalamos un cliente gráfico para Redis
+
+* `sudo snap install redis-desktop-manager`
+
+### CeleryExecutor
+
+* `executor = CeleryExecutor` en el fichero airflow.cfg
+* `broker_url = redis://localhost:6379/0`. La base de datos es `0` que se creará la primera vez que se vaya a insertar algo.
+* `result_backend = db+postgresql://airflow:airflow@localhost:5432/airflow`
+
+Una feature que viene por defecto para monitorizar los workers, es **Flower**.
+
+* `airflow celery flower`. Estará disponible en el puerto 5555. Si echamos un vistazo vemos que no tenemos ahora mismo configurado ningún worker, por tanto, no podremos ejecutar ninguna de las tareas con airflow.
+
+## Agregando nuevos workers
+
+Para agregar un nuevo worker en la máquina donde se está ejecutando airflow podemos ejecutar:
+
+* `airflow celery worker`
+
+Este comando lo deberíamos ejecutar en cada servidor que quisiéramos que formase parte de nuestro cluster de airflow. Una vez ejecutado este comando, podemos comprobar con **Flower** que tenemos una máquina lista para poder ejecutar tareas.
+
+Ahora, ¿cómo podríamos limitar el número de ejecuciones de DAGs en cada worker?, es decir, ¿cómo decidir cuántos DAGs runs podríamos tener en paralelo?, ¿y cómo limitar el número de tareas que podemos ejecutar en cada máquina?.
+
+### Parallelism
+
+Definer el número total de tareas que se pueden ejecutar en paralelo en todo el cluster o instancia de Airflow. Por defecto está a 32. Si pusiésemos este valor a 1, estaríamos replicando el comportamiento del SequentialExecutor.
+
+Esto tendría sentido si por ejemplo quisiéramos que nuestra instancia de Airflow no consumiese todos los recursos disponibles de una máquina. **Pero un caso de uso más habitual es limitar el número de tareas simultáneas que pueden ejecutar un DAG concreto**.
+
+### dag_concurrency
+
+Es el número de *task instances* que se pueden ejecutar en paralelo en un DAG. Se puede sobreescribir por el parámetro `concurrency` a nivel de DAG.
+
+**Se recomienda dejar los valores por defecto en parallelism y dag_concurrency y ajustar el parámetro el parámetro concurrency para cada DAG que creemos.**
+
+## DAGs runs concurrency
+
+¿Cómo limitar las ejecuciones simultáneas de los DAGs?, supongamos que tienen que ejecutarse se forma secuencial porque los datos que generados en una ejecución se utilizan por la siguiente.
+
+### max_active_runs_per_dag
+
+Por defecto está a 16. Controla las ejecuciones simultáneas que puede haber de un mismo DAG.
+
+Se puede configurar en el fichero airflow.cfg (afectará a todos los DAGs) o bien utilizar el parámetro `max_active_runs` a nivel de DAG.
+
+
+# Airflow: complex data pipelines
+
+## Agrupación de tareas, TASK GROUPS
+
+Se trata de agrupar tareas con la misma funcionalidad para que el DAG no sea muy complejo y para facilitar su comprensión. Se trataría de pasar de esta situación ...
+
+<img src="img/i_008.png"/>
+
+... a esta otra ...
+
+<img src="img/i_009.png"/>
+
+Se trata de usar **TaskGroup**
+
+```
+from airflow.utils.task_group import TaskGroup
+
+...
+
+with TaskGroup('processing_tasks') as processing_tasks:
+    task_2 = BashOperator(
+        task_id='task_2',
+        bash_command='sleep 3'
+    )
+
+    task_3 = BashOperator(
+        task_id='task_3',
+        bash_command='sleep 3'
+    )
+```
+
+Para crear Subgrupos dentro de Grupos sería de la misma forma.
+
+Los nombres de las tareas que están dentro de un grupo o un subgrupo se renombrarán y se añadirá como prefijo el nombre del grupo o subgrupo al que pertenecen.
+
+# Airflow: XComs, intercambio de datos
+
+Permite intercambiar datos entre distintas taraes. Está limitado en tamaño, por ejemplo, para Postgres, está limitado a 1GB.
