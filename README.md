@@ -364,3 +364,69 @@ Los nombres de las tareas que están dentro de un grupo o un subgrupo se renombr
 # Airflow: XComs, intercambio de datos
 
 Permite intercambiar datos entre distintas taraes. Está limitado en tamaño, por ejemplo, para Postgres, está limitado a 1GB.
+
+# Airflow: elegir las tareas a ejecutar
+
+Ejecutaremos una tarea u otra dependiendo de los valores que obtengamos en tareas previas, por ejemplo, el resultado de una consulta a base de datos.
+
+Para esto tendremos que utilizar el **BranchPythonOperator**. Nos permite ejecutar una tarea u otra devolviendo el task_id de la tarea que queremos ejecutar.
+
+Bajo los XComs se almacenará la tarea devuelta por el `branch operator`.
+
+# Airflow: Trigger rules
+
+Nos permite cambiar el comportamiento por defecto relacionado con las dependencias. Por defecto, si hay tres tareas que tienen que ejecutarse en paralelo y luego una cuarta, ésta última sólo se ejecutará si las tres finalizaron bien. ¿Y si quiero que se ejecute sólo cuando una ha ido mal?, ¿o cuándo solo una ha ido bien?.
+
+Mediante las **Trigger rules** podemos cambiar este comportamiento por defecto y determinar bajo qué condiciones se ejecutará una tarea. **Hay 9 diferentes**:
+
+## [task_a, task_b] >> task_c
+
+### all_success
+
+Es el comportamiento por defecto). Si `task_a` finaliza con error, `task_c` quedará en estado `upstream_failed`
+
+### all_failed
+
+`task_c` se ejecutará si las dos tareas fallan. Quedará en estado `skipped` si una de las dos finalizó con éxito.
+
+### all_done
+
+`task_c` se ejecutará si las dos anteriores se ejecutaron y sin importar el estado en que finalizaron.
+
+### one_success
+
+`task_c` se ejecutará si una de las dos anteriores terminó con éxito.
+
+### one_failed
+
+`task_c` se ejecutará si una de las dos anteriores terminó `failed`.
+
+### none_failed
+
+`task_c` se ejecutará si las dos anteriores terminaron en los estados `success` o `skipped`.
+
+### none_failed_or_skipped
+
+`task_c` se ejecutará si al menos uno de los padres terminó `success`. El resto pueden terminar `skipped`. La diferencia con la regla anterior **none_failed** es que con **none_failed** se ejecutará `task_c` si las dos tareas terminaron en `skipped`. Con la regla **none_failed_or_skipped** al menos una tiene que finalizar con éxito.
+
+Disponemos del parámetro `trigger_rule` en cada task para indicar estas dependencias.
+
+# Airflow: creación de plugins
+
+Se pueden crear:
+
+* Operators
+* Views
+* Hooks
+
+Hay tres carpetas que Airflow monitoriza:
+
+* plugins. Aquí pondremos nuestros plugins (tendremos que crearla).
+* config
+* dags
+
+En Airflow 2.0, la clase `AirflowPluginClass` se utiliza para personalizar la interfaz de usuario (antes se utilizaba para crear plugins y nuestros desarrollos heredaban de ella).
+
+En Airflow 2.0, los plugins se crean como módulos normales de Python. Dentro de la carpeta `plugins` creamos una carpeta con el nombre del plugin y dentro de aquí el código python con los nuevos operators, ... y ya podremos utilizarmos directamente en nuestros **Data Pipelines**.
+
+La carga de plugins es *Lazy Loaded*, tendremos que reiniciar la instancia de Airflow cada vez que agreguemos un nuevo plugin. Luego podremos modificarlos sin necesidad de reiniciar la instancia una y otra vez.

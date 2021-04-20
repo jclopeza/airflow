@@ -1,8 +1,9 @@
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.subdag import SubDagOperator
 from airflow.utils.task_group import TaskGroup
+from airflow.operators.dummy import DummyOperator
 
 from random import uniform
 from datetime import datetime
@@ -23,7 +24,14 @@ def _choose_best_model(ti):
         'processing_tasks.training_model_b',
         'processing_tasks.training_model_c',
     ])
-    print(accuracies)
+    # Aquí tenemos que devolver el task_id de la tarea que queremos ejecutar
+    for accuracy in accuracies:
+        if accuracy > 5:
+            return 'accurate'
+    return 'inaccurate'
+    # Es posible devolver una lista con varias tareas a ejecutar
+    # return ['accurate', 'inaccurate']
+
 
 with DAG('xcom_dag', schedule_interval='@daily', default_args=default_args, catchup=False) as dag:
 
@@ -55,9 +63,27 @@ with DAG('xcom_dag', schedule_interval='@daily', default_args=default_args, catc
             python_callable=_training_model
         )
 
-    choose_model = PythonOperator(
+    choose_model = BranchPythonOperator(
         task_id='choose_best_model',
         python_callable=_choose_best_model
     )
 
+    accurate = DummyOperator(
+        task_id='accurate'
+    )
+
+    inaccurate = DummyOperator(
+        task_id='inaccurate'
+    )
+
+    storing = DummyOperator(
+        task_id='storing',
+        trigger_rule='none_failed_or_skipped'
+    )
+
     downloading_data >> processing_tasks >> choose_model
+    choose_model >> [accurate, inaccurate] >> storing
+    # Por defecto, la tarea 'storing' no se ejecutará si las dos tareas
+    # que la preceden no se ejecutaron. ¿Cómo cambiar este comportamiento por defecto?
+    # Imaginemos que quiero ejecutar una tarea 'Alerting' que quiero que se ejecute
+    # si alguna de las tareas anteriores finalizó con error
