@@ -25,7 +25,7 @@ page = requests.get(url, headers=headers)
 # El objeto BeautifulSoup lo utilizaremos para la extracción de datos
 # The 'html.parser' parameter represents which parser we will use when creating our object,
 # a parser is a software responsible for converting an entry to a data structure.
-pagina_bs = BeautifulSoup(page.content, 'html.parser')
+pagina_bs = BeautifulSoup(page.text, 'html.parser')
 
 # Obtención de los nombres de los jugadores
 nombres_jugadores = []
